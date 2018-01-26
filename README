@@ -1,0 +1,13 @@
+sitegen
+=======
+
+A very stupid site generator. This was an exercise in how dumb I could make a
+site generator and still keep it useful. The only dependency is pandoc_. It
+expects a set of reStructuredText_ file in the `source` directory and will
+write its output to `out`. The index is an alphabetically sorted list of
+document titles.
+
+.. _reStructuredText: http://docutils.sourceforge.net/rst.html
+.. _pandoc: https://pandoc.org/
+
+.. vim:set ft=rst:

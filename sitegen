@@ -1,0 +1,17 @@
+#!/bin/sh
+
+index=$(mktemp)
+trap "rm $index" EXIT
+
+mkdir -p out
+find source -maxdepth 1 -name \*.rst -type f | while read filename; do
+	slug=$(basename "$filename" .rst)
+	mkdir -p "out/${slug}"
+	pandoc "$filename" --smart --standalone -o "out/${slug}/index.html" \
+		--template=templates/page.tpl
+	pandoc "$filename" -t plain -o - --variable="slug:$slug" \
+		--template=templates/toc-line.tpl >> $index
+done
+
+sort $index | pandoc - -f rst --smart --standalone -o "out/index.html" \
+	--template=templates/home.tpl
