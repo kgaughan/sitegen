@@ -1,17 +1,197 @@
 #!/bin/sh
+#
+# sitegen
+# by Keith Gaughan <talideon@tilde.club>
+#
+# A dumb as bricks site generator.
+#
 
-index=$(mktemp)
-trap "rm $index" EXIT
+set -e
 
-mkdir -p out
-find source -maxdepth 1 -name \*.rst -type f | while read filename; do
-	slug=$(basename "$filename" .rst)
-	mkdir -p "out/${slug}"
-	pandoc "$filename" -f rst+smart --standalone -o "out/${slug}/index.html" \
-		--template=templates/page.tpl
-	pandoc "$filename" -t plain -o - --variable="slug:$slug" \
-		--template=templates/toc-line.tpl >> $index
+usage () {
+	if test "$1" != ""; then
+		echo "error: $1"
+		echo
+	fi
+	cat <<FIN
+Usage:
+
+  sitegen -h
+  sitegen -w [-t TEMPLATES]
+  sitegen [-o OUT] [-t TEMPLATES] [-f FMT] [-s SRC]
+
+Options:
+
+  -h            Show this help.
+  -w            Write templates out to directory specified by -t.
+  -o OUT        Output directory.
+  -t TEMPLATES  Template source directory.
+  -f FMT        Source file format. Default: rst
+  -s SRC        Source file directory.
+
+The format can be one of:
+
+ * rst
+ * commonmark
+ * markdown
+ * markdown_mmd
+ * markdown_phpextra
+ * markdown_strict
+
+If the directory flags aren't specified then -o, -t, and -s each default to
+the directories 'out', 'templates', and 'src' in the current directory.
+FIN
+}
+
+# Needed to keep the submission requirements happy.
+if test "${1:-}" = "--help"; then
+	usage
+	exit 2
+fi
+
+while getopts hwo:t:f:s: name; do
+	case "$name" in
+	w)
+		write_templates="1"
+		;;
+	o)
+		output_dir="$OPTARG"
+		;;
+	t)
+		template_dir="$OPTARG"
+		;;
+	f)
+		format="$OPTARG"
+		;;
+	s)
+		source_dir="$OPTARG"
+		;;
+	h)
+		usage
+		exit 2
+		;;
+	esac
 done
 
-sort $index | pandoc - -f rst+smart --standalone -o "out/index.html" \
-	--template=templates/home.tpl
+: ${format:=rst}
+: ${source_dir:=$PWD/src}
+: ${output_dir:=$PWD/out}
+: ${template_dir:=$PWD/templates}
+
+case "$format" in
+rst)
+	ext=rst
+	;;
+commonmark|markdown|markdown_mmd|markdown_phpextra|markdown_strict)
+	ext=md
+	;;
+*)
+	usage "bad input format" >&2
+	exit 1
+	;;
+esac
+
+if test "$write_templates" = "1"; then
+	mkdir -p "$template_dir"
+	cat <<-'FIN' > "$template_dir/home.tpl"
+	<!DOCTYPE html>
+	<html lang="en"><head>
+
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>ZomboCom</title>
+		<link rel="stylesheet" href="/style.css" type="text/css">
+
+	</head><body>
+
+	<header>
+	<h1><a href=".">ZomboCom</a></h1>
+	</header>
+
+	<article>
+	<p>This... is... ZomboCom. Welcome. This is ZomboCom; welcome... to ZomboCom.
+	You can do anything at ZomboCom. Anything at all. The only limit is yourself.
+	Welcome... to ZomboCom.</p>
+
+	$if(entries)$
+	<ul>
+	$for(entries)$
+	<li><a href="$entries.slug$/">$entries.title$</a></li>
+	$endfor$
+	</ul>
+	$else$
+	<p>There are no entries. Maybe write one.</p>
+	$endif$
+	</article>
+
+	</body></html>
+	FIN
+
+	cat <<-'FIN' > "$template_dir/page.tpl"
+	<!DOCTYPE html>
+	<html lang="en"><head>
+
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>ZomboCom: $title$</title>
+		<link rel="stylesheet" href="/style.css" type="text/css">
+
+	</head><body>
+
+	<header>
+	<h1><a href="..">ZomboCom</a>: $title$</h1>
+	</header>
+
+	<article>
+	$body$
+	</article>
+
+	</body></html>
+	FIN
+else
+	for i in page.tpl toc-line.tpl home.tpl; do
+		if test ! -e "$template_dir/$i"; then
+			echo "The template $i does not exist." >&2
+			echo "Please run: sitegen -w -t $template_dir" >&2
+			exit 1
+		fi
+	done
+
+	entry_tpl=$(mktemp entry.XXXXXXXXXX.yml)
+	cat <<-'FIN' > "$entry_tpl"
+	- title: "$title$"
+	  slug: "$slug$"
+	FIN
+
+	index=$(mktemp index.XXXXXXXXXX.yml)
+	cat <<-'FIN' > "$index"
+	---
+	title: dummy
+	entries:
+	FIN
+
+	trap "rm $entry_tpl $index" EXIT
+
+	mkdir -p "$output_dir"
+	find "$source_dir" -maxdepth 1 -name "*.$ext" -type f | sort | while read filename; do
+		slug=$(basename "$filename" .$ext)
+		mkdir -p "$output_dir/$slug"
+		pandoc "$filename" \
+			--from="$format+smart" \
+			--standalone \
+			--output="$output_dir/$slug/index.html" \
+			--template="$template_dir/page.tpl"
+		pandoc "$filename" \
+			--to=plain \
+			--output=- \
+			--variable="slug:$slug" \
+			--template="$entry_tpl" >> $index
+	done
+	echo "---" >> $index
+
+	pandoc $index \
+		--from="markdown+smart" \
+		--standalone \
+		--output="$output_dir/index.html" \
+		--template="$template_dir/home.tpl"
+fi
